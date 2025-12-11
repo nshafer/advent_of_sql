@@ -1,0 +1,63 @@
+# Day2
+
+```elixir
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino_explorer, "~> 0.1.25"}
+])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+defmodule SnowballCategory do
+  use Ecto.Schema
+
+  schema "snowball_categories" do
+    field :official_category, :string
+  end
+end
+
+defmodule SnowballInventory do
+  use Ecto.Schema
+
+  schema "snowball_inventory" do
+    field :batch_id, :string
+    field :category_name, :string
+    field :quantity, :integer
+    field :status, :string
+  end
+end
+
+```
+
+## Queries
+
+```elixir
+import Ecto.Query
+
+from(c in SnowballCategory,
+  left_join: i in SnowballInventory,
+  on: i.category_name == c.official_category,
+  group_by: c.official_category,
+  where: i.quantity > 0 and i.status == "ready",
+  order_by: sum(i.quantity),
+  select: [
+    category: c.official_category,
+    total_usable_snowballs: sum(i.quantity)
+  ]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```

@@ -1,0 +1,61 @@
+# Day1
+
+```elixir
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino_explorer, "~> 0.1.25"},
+])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+defmodule WishList do
+  use Ecto.Schema
+
+  schema "wish_list" do
+    field :child_name, :string
+    field :raw_wish, :string
+  end
+end
+
+defmodule CustomFunctions do
+  defmacro trim(text) do
+    quote do
+      fragment("trim(?)", unquote(text))
+    end
+  end
+
+  defmacro lower(text) do
+    quote do
+      fragment("lower(?)", unquote(text))
+    end
+  end
+end
+```
+
+## Queries
+
+```elixir
+import Ecto.Query
+import CustomFunctions
+
+from(w in WishList,
+  group_by: trim(lower(w.raw_wish)),
+  order_by: [desc: count()],
+  select: [wish: trim(lower(w.raw_wish)), count: count()]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
