@@ -1,0 +1,115 @@
+# Day3
+
+```elixir
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino_explorer, "~> 0.1.25"}
+])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule HotlineMessages do
+  use Ecto.Schema
+
+  schema "hotline_messages" do
+    field :caller_name, :string
+    field :transcript, :string
+    field :tag, :string
+    field :status, :string
+  end
+end
+```
+
+## First task
+
+```elixir
+base_query =
+  from(
+    m in HotlineMessages,
+    where: ilike(m.transcript, "%sorry%")
+  )
+
+from(
+  m in base_query,
+  group_by: m.status,
+  select: [status: m.status, count: count()]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
+
+```elixir
+Repo.update_all(base_query, set: [status: "approved"])
+```
+
+## Second task
+
+```elixir
+
+bad_tags = ["penguin prank", "time-loop advisory", "possible dragon", "nonsense alert"]
+
+base_query =
+  from(
+    m in HotlineMessages,
+    where: m.tag in ^bad_tags or m.caller_name == "Test Caller"
+  )
+
+from(m in base_query, select: [count: count()])
+|> Repo.all()
+```
+
+```elixir
+Repo.delete_all(base_query)
+```
+
+## Third task
+
+```elixir
+from(
+  m in HotlineMessages,
+  where: m.status == "approved" or is_nil(m.status),
+  group_by: m.status,
+  select: [status: m.status, count: count()]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
+
+```elixir
+from(
+  m in HotlineMessages,
+  select: [
+    approved_count: sum(fragment("CASE WHEN status = 'approved' THEN 1 ELSE 0 END")),
+    needs_review: sum(fragment("CASE WHEN status IS NULL THEN 1 ELSE 0 END")),
+  ]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
+
+```elixir
+from(
+  m in HotlineMessages,
+  select: [
+    approved_count: filter(count(), m.status == "approved"),
+    needs_review: filter(count(), is_nil(m.status)),
+  ]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
