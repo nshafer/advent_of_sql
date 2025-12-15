@@ -1,0 +1,97 @@
+# Day 4
+
+```elixir
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino_explorer, "~> 0.1.25"}
+])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule OfficialShifts do
+  use Ecto.Schema
+
+  schema "official_shifts" do
+    field :volunteer_name, :string
+    field :role, :string
+    field :shift_time, :string
+    field :age_group, :string
+    field :code, :string
+  end
+end
+
+defmodule LastMinuteSignups do
+  use Ecto.Schema
+
+  schema "last_minute_signups" do
+    field :volunteer_name, :string
+    field :assigned_task, :string
+    field :time_slot, :string
+  end
+end
+```
+
+## Query
+
+```elixir
+# from(o in OfficialShifts, select: map(o, [:volunteer_name, :role, :shift_time]))
+# from(l in LastMinuteSignups, select: map(l, [:volunteer_name, :assigned_task, :time_slot]))
+merged =
+  from(
+    o in OfficialShifts,
+    full_join: l in LastMinuteSignups,
+    on: o.volunteer_name == l.volunteer_name,
+    select: %{
+      volunteer: coalesce(o.volunteer_name, l.volunteer_name),
+      role: coalesce(o.role, l.assigned_task),
+      shift: coalesce(o.shift_time, l.time_slot)
+    }
+  )
+
+from(
+  m in subquery(merged),
+  distinct: true,
+  select: [
+    volunteer: m.volunteer,
+    role:
+      fragment("""
+        CASE
+            WHEN role ILIKE '%stage%' THEN 'Stage Setup'
+            WHEN role ILIKE '%cocoa%' THEN 'Cocoa Station'
+            WHEN role ILIKE '%park%' THEN 'Parking Support'
+            WHEN role ILIKE '%choir%' THEN 'Choir Assistant'
+            WHEN role ILIKE '%shovel%' THEN 'Snow Shoveling'
+            WHEN role ILIKE '%hand%' THEN 'Handwarmer Handout'
+            WHEN TRUE THEN CONCAT('UNCAUGHT_ROLE: ', role)
+            END
+      """),
+    shift:
+      fragment("""
+        CASE
+            WHEN shift ILIKE '10%am%' THEN '10:00 AM'
+            WHEN shift ILIKE 'noon' THEN '12:00 PM'
+            WHEN shift ILIKE '12%pm%' THEN '12:00 PM'
+            WHEN shift ILIKE '2%pm%' THEN '2:00 PM'
+            WHEN TRUE THEN CONCAT('UNCAUGHT_SHIFT_TIME: ', shift)
+            END    
+      """)
+  ]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
