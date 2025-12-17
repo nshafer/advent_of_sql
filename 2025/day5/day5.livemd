@@ -1,0 +1,78 @@
+# Day 5
+
+```elixir
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino_explorer, "~> 0.1.25"}
+])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule ListeningLog do
+  use Ecto.Schema
+
+  schema "listening_logs" do
+    field :user_name, :string
+    field :artist, :string
+    field :played_at, :naive_datetime
+    field :content_type, :string
+  end
+end
+
+```
+
+## Query
+
+```elixir
+# from(l in ListeningLog, select: map(l, [:user_name, :artist, :played_at, :content_type]))
+ranked =
+  from(
+    l in ListeningLog,
+    group_by: [
+      l.user_name,
+      l.artist
+    ],
+    windows: [
+      users: [
+        partition_by: l.user_name,
+        order_by: [desc: count(l)]
+      ]
+    ],
+    select: %{
+      user_name: l.user_name,
+      artist: l.artist,
+      count: count(l),
+      rank: over(rank(), :users)
+    },
+    order_by: [l.user_name, desc: count(l)]
+  )
+
+from(
+  r in subquery(ranked),
+  where: r.rank <= 3,
+  order_by: [r.user_name, desc: r.count],
+  select: [
+    user_name: r.user_name,
+    artist: r.artist,
+    count: r.count,
+    rank: r.rank
+  ]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
