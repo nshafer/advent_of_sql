@@ -1,0 +1,68 @@
+# Day 6
+
+```elixir
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino_explorer, "~> 0.1.25"}
+])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule Family do
+  use Ecto.Schema
+
+  schema "families" do
+    field :name, :string, source: :family_name
+  end
+end
+
+defmodule AssignedDelivery do
+  use Ecto.Schema
+
+  schema "deliveries_assigned" do
+    field :gift_date, :date
+    field :gift_name, :string
+    belongs_to :family, Family
+  end
+end
+```
+
+## Query
+
+```elixir
+# from(f in Family, select: map(f, [:name]))
+# from(ad in AssignedDelivery, select: map(ad, [:gift_date, :gift_name, :family_id]))
+
+family_days =
+  from(
+    d in fragment("select MAKE_DATE(2025, 12, n) AS date FROM GENERATE_SERIES(15, 31) AS n"),
+    cross_join: f in Family,
+    select: %{date: d.date, family_id: f.id, family_name: f.name}
+  )
+
+from(
+  fd in subquery(family_days),
+  left_join: ad in AssignedDelivery,
+  on: fd.date == ad.gift_date and fd.family_id == ad.family_id,
+  where: is_nil(ad.gift_date),
+  order_by: [fd.date, fd.family_name],
+  select: [unassigned_date: fd.date, name: fd.family_name]
+)
+|> Repo.all()
+|> Explorer.DataFrame.new()
+```
