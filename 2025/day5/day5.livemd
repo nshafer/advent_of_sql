@@ -4,7 +4,7 @@
 Mix.install([
   {:ecto_sql, "~> 3.10"},
   {:postgrex, ">= 0.0.0"},
-  {:kino_explorer, "~> 0.1.25"}
+  {:kino, "~> 0.18.0"}
 ])
 
 Application.put_env(:myapp, Repo,
@@ -74,5 +74,5 @@ from(
   ]
 )
 |> Repo.all()
-|> Explorer.DataFrame.new()
+|> Kino.DataTable.new()
 ```
