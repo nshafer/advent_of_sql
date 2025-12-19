@@ -1,0 +1,87 @@
+# Day 8
+
+```elixir
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino, "~> 0.18.0"}
+])
+
+Kino.configure(inspect: [charlists: :as_lists])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule Product do
+  use Ecto.Schema
+
+  @primary_key {:product_id, :id, autogenerate: true}
+  schema "products" do
+    field :name, :string, source: :product_name
+  end
+end
+
+defmodule PriceChange do
+  use Ecto.Schema
+
+  schema "price_changes" do
+    field :price, :decimal
+    field :effective_timestamp, :naive_datetime
+    belongs_to :product, Product, references: :product_id
+  end
+end
+```
+
+## Query
+
+```elixir
+# from(p in Product)
+# from(pc in PriceChange, preload: [:product])
+
+prices = from(
+  pc in PriceChange,
+  windows: [
+    products_desc: [
+      partition_by: pc.product_id,
+      order_by: [desc: pc.effective_timestamp]
+    ]
+  ],
+  order_by: [pc.product_id, pc.effective_timestamp],
+  select: %{
+    product_id: pc.product_id,
+    current_price: pc.price,
+    previous_price: over(fragment("LEAD(?)", pc.price), :products_desc),
+    row_number: over(fragment("ROW_NUMBER()"), :products_desc)
+  }
+)
+
+from(
+  p in Product,
+  left_join: pr in subquery(prices),
+  on: p.product_id == pr.product_id,
+  where: pr.row_number == 1,
+  order_by: p.product_name,
+  select: [
+    product_name: p.name,
+    current_price: pr.current_price,
+    previous_price: pr.previous_price,
+    price_difference: pr.current_price - pr.previous_price
+  ]
+)
+
+|> Repo.all()
+|> Kino.DataTable.new()
+```
