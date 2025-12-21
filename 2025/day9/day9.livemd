@@ -1,0 +1,140 @@
+# Day 9
+
+```elixir
+# Configure postgrex to use the build-in JSON library before it's compiled
+Application.put_env(:postgrex, :json_library, JSON)
+
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino, "~> 0.18.0"}
+])
+
+Kino.configure(inspect: [charlists: :as_lists])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule Order do
+  use Ecto.Schema
+
+  schema "orders" do
+    field :customer_id, :integer
+    field :created_at, :naive_datetime
+    field :order_data, :map
+  end
+end
+```
+
+## Query
+
+```elixir
+latest_orders =
+  from(
+    o in Order,
+    windows: [
+      customers: [partition_by: o.customer_id, order_by: [desc: o.created_at]]
+    ],
+    select: %{
+      customer_id: o.customer_id,
+      created_at: o.created_at,
+      order_data: o.order_data,
+      row_number: row_number() |> over(:customers)
+    }
+  )
+
+# latest_orders
+# |> Repo.all()
+# |> Kino.DataTable.new()
+```
+
+## Method 1: Decode JSON in postgres
+
+```elixir
+# from(o in Order)
+
+{db_elapsed, results} =
+  :timer.tc(fn ->
+    from(
+      l in subquery(latest_orders),
+      select: [
+        customer_id: l.customer_id,
+        created_at: l.created_at,
+        shipping_method: fragment("? -> 'shipping' ->> 'method'", l.order_data),
+        gift_wrapped: fragment("(? -> 'gift' ->> 'wrapped')::BOOLEAN", l.order_data),
+        risk_flag: fragment("? -> 'risk' ->> 'flag'", l.order_data)
+      ],
+      order_by: [desc: l.created_at]
+    )
+    |> Repo.all()
+  end)
+
+IO.puts(:stderr, "Took #{db_elapsed}ms")
+Kino.DataTable.new(results)
+```
+
+## Method 2: Decode json in Elixir
+
+```elixir
+# from(o in Order)
+
+{elixir_elapsed, results} =
+  :timer.tc(fn ->
+    from(
+      l in subquery(latest_orders),
+      select: %{
+        customer_id: l.customer_id,
+        created_at: l.created_at,
+        order_data: l.order_data
+      },
+      order_by: [desc: l.created_at]
+    )
+    |> Repo.all()
+    |> Enum.map(fn %{order_data: order_data} = row ->
+      [
+        customer_id: row.customer_id,
+        created_at: row.created_at,
+        shipping_method: get_in(order_data, ["shipping", "method"]),
+        gift_wrapped: get_in(order_data, ["gift", "wrapped"]),
+        risk_flag: get_in(order_data, ["risk", "flag"])
+      ]
+    end)
+  end)
+
+IO.puts(:stderr, "Took #{elixir_elapsed}ms")
+Kino.DataTable.new(results)
+```
+
+```elixir
+IO.puts("Postgres took: #{db_elapsed}ms")
+IO.puts("Elixir took: #{elixir_elapsed}ms")
+
+if db_elapsed < elixir_elapsed do
+  IO.puts("Postgres is #{elixir_elapsed / db_elapsed} times faster")
+else
+  IO.puts("Postgres is #{db_elapsed / elixir_elapsed} times slower")
+end
+```
+
+### Findings
+
+* Even with `fragment`, doing it in DB is overall less code
+* Elixir is more flexible and easier to read
+* Processing json in Postgres is about **7 times faster**, even compared to using new `JSON` module in Elixir
+
+### Conclusion
+
+Process json in the database if you can!
