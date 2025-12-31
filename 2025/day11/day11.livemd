@@ -1,0 +1,72 @@
+# Day 11
+
+```elixir
+# Configure postgrex to use the build-in JSON library before it's compiled
+Application.put_env(:postgrex, :json_library, JSON)
+
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino, "~> 0.18.0"}
+])
+
+Kino.configure(inspect: [charlists: :as_lists])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule BehaviorLog do
+  use Ecto.Schema
+
+  schema "behavior_logs" do
+    field :child_id, :integer
+    field :child_name, :string
+    field :behavior_date, :date
+    field :score, :integer
+  end
+end
+
+```
+
+## Query
+
+```elixir
+# from(b in BehaviorLog)
+
+averages =
+  from(
+    b in BehaviorLog,
+    windows: [
+      w: [
+        partition_by: b.child_id,
+        order_by: b.behavior_date,
+        frame: fragment("ROWS 6 PRECEDING")
+      ]
+    ],
+    select: map(b, [:child_id, :child_name, :behavior_date]),
+    select_merge: %{
+      rolling_average: avg(b.score) |> over(:w)
+    }
+  )
+
+from(
+  a in subquery(averages),
+  where: a.behavior_date >= ^Date.new!(2025, 12, 07) and a.rolling_average < 0,
+  order_by: [a.behavior_date, a.child_name]
+)
+|> Repo.all()
+|> Kino.DataTable.new()
+```
