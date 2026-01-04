@@ -1,0 +1,69 @@
+# Day 13
+
+```elixir
+# Configure postgrex to use the build-in JSON library before it's compiled
+Application.put_env(:postgrex, :json_library, JSON)
+
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino, "~> 0.18.0"}
+])
+
+Kino.configure(inspect: [charlists: :as_lists])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule TravelManifestCount do
+  use Ecto.Schema
+
+  @primary_key false
+  embedded_schema do
+    field :vehicle_id, :string
+    field :departure_time, :naive_datetime
+    field :count, :integer
+  end
+end
+```
+
+## Query
+
+```elixir
+# NOTE: Postgrex doesn't support the `xml` column type at all from what I've seen, so
+# we can't even use a custom Ecto.Type. There might be other ways to process this data
+# but I'm unlikely to use XML in the future, so I'm not going to bother researching. For
+# now this is just an exercise for how to get arbitrary data out of the database and
+# load it into a normal list of Embedded Schemas. Something like this could exist in a
+# Context function to get the raw data for the app to use.
+
+query = """
+  SELECT vehicle_id, departure_time, count(name)
+  FROM travel_manifests,
+       XMLTABLE('//manifest/passengers/passenger' PASSING manifest_xml COLUMNS name TEXT)
+  WHERE vehicle_id LIKE $1
+  GROUP BY vehicle_id, departure_time
+  HAVING count(name) > $2
+  ORDER BY departure_time, vehicle_id
+"""
+
+# Run the query, passing the vehicle_id filter and cutoff for counts
+result = Repo.query!(query, ["CARGO-%", 20])
+
+result.rows
+|> Enum.map(&Repo.load(TravelManifestCount, {result.columns, &1}))
+|> Kino.DataTable.new()
+```
