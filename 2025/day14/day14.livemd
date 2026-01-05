@@ -1,0 +1,116 @@
+# Day 14
+
+```elixir
+# Configure postgrex to use the build-in JSON library before it's compiled
+Application.put_env(:postgrex, :json_library, JSON)
+
+Mix.install([
+  {:ecto_sql, "~> 3.10"},
+  {:postgrex, ">= 0.0.0"},
+  {:kino, "~> 0.18.0"}
+])
+
+Kino.configure(inspect: [charlists: :as_lists])
+
+Application.put_env(:myapp, Repo,
+  url: "ecto://postgres:postgres@localhost/advent_of_sql_2025"
+)
+
+defmodule Repo do
+  use Ecto.Repo, adapter: Ecto.Adapters.Postgres, otp_app: :myapp
+end
+
+{:ok, _pid} = Repo.start_link()
+```
+
+## Setup
+
+```elixir
+import Ecto.Query
+
+defmodule MountainNetwork do
+  use Ecto.Schema
+
+  schema "mountain_network" do
+    field :from_node, :string
+    field :to_node, :string
+    field :node_type, :string
+    field :difficulty, :string
+  end
+end
+
+defmodule MountainPath do
+  use Ecto.Schema
+
+  @primary_key false
+  embedded_schema do
+    field :path, :string
+    field :last, :string
+    field :count, :integer
+  end
+end
+```
+
+## Query
+
+```elixir
+start_node = "Jake's Lift"
+end_node = "Maverick"
+```
+
+```elixir
+# Raw query method
+
+query = """
+  WITH RECURSIVE net AS (
+      SELECT $1 AS path, $1 AS last, 1 AS count
+       UNION ALL
+      SELECT n.path || ' -> ' || m.to_node ||
+             CASE WHEN m.node_type = 'Trail' THEN ' (' || m.difficulty || ')' ELSE '' END,
+             m.to_node,
+             n.count + 1
+        FROM net n, mountain_network m
+       WHERE n.last = m.from_node
+         AND n.count < 12
+         AND n.path NOT LIKE '%' || to_node || '%'
+  )
+  select * from net where last = $2
+"""
+
+result = Repo.query!(query, [start_node, end_node])
+
+result.rows
+|> Enum.map(&Repo.load(MountainPath, {result.columns, &1}))
+|> Kino.DataTable.new()
+```
+
+```elixir
+# Expressions method with `recursive_ctes/2` and `with_cte/3`
+
+path_initial =
+  from(
+    f in fragment("SELECT ? AS path, ? AS last, 1 AS count", ^start_node, ^start_node),
+    select: map(f, [:path, :last, :count])
+  )
+
+path_recursive =
+  MountainNetwork
+  |> join(:inner, [m], n in "net", on: n.last == m.from_node)
+  |> where([m, n], n.count < 12)
+  |> where([m, n], not like(fragment("'%' || ? || '%'", m.to_node), n.path))
+  |> select([m, n], %{
+    path: fragment("? || ' -> ' || ?", n.path, m.to_node),
+    last: m.to_node,
+    count: n.count + 1
+  })
+
+path_query = union_all(path_initial, ^path_recursive)
+
+from(n in "net")
+|> recursive_ctes(true)
+|> with_cte("net", as: ^path_query)
+|> select([n], map(n, [:path, :last, :count]))
+|> where([n], n.last == ^end_node)
+|> Repo.all()
+|> Kino.DataTable.new()
+```
